@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+
 import { createClient } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Duo, DailyEntry, Measurement, Comment, User } from '@/lib/types'
 
 export default function DashboardPage() {
@@ -15,6 +16,7 @@ export default function DashboardPage() {
   const [partnerMeasures, setPartnerMeasures] = useState<Measurement[]>([])
   const [comments, setComments] = useState<Comment[]>([])
   const [newComment, setNewComment] = useState('')
+  const commentRef = useRef('')
   const [activeTab, setActiveTab] = useState<'dashboard'|'entry'|'measures'|'history'|'report'>('dashboard')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -45,7 +47,23 @@ export default function DashboardPage() {
 
   function today() { return new Date().toISOString().split('T')[0] }
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => { 
+  loadAll()
+}, [])
+
+useEffect(() => {
+  if (!duo) return
+  const channel = supabase
+    .channel('comments')
+    .on('postgres_changes', { 
+      event: 'INSERT', 
+      schema: 'public', 
+      table: 'comments',
+      filter: `duo_id=eq.${duo.id}`
+    }, () => { loadAll() })
+    .subscribe()
+  return () => { supabase.removeChannel(channel) }
+}, [duo])
 
   async function loadAll() {
     setLoading(true)
@@ -122,10 +140,13 @@ export default function DashboardPage() {
   }
 
   async function sendComment() {
-    if (!user || !duo || !newComment.trim()) return
-    await supabase.from('comments').insert({ duo_id: duo.id, user_id: user.id, content: newComment.trim() })
-    setNewComment('')
-    loadAll()
+  const content = commentRef.current.trim()
+  if (!user || !duo || !content) return
+  const input = document.getElementById('commentInput') as HTMLInputElement
+  if (input) input.value = ''
+  commentRef.current = ''
+  await supabase.from('comments').insert({ duo_id: duo.id, user_id: user.id, content })
+  loadAll()
   }
 
   async function logout() {
@@ -305,7 +326,9 @@ export default function DashboardPage() {
               ))}
             </div>
             <div style={{ padding: '12px 20px', borderTop: `1px solid ${c.border}`, display: 'flex', gap: 10 }}>
-              <input value={newComment} onChange={e => setNewComment(e.target.value)}
+              <input
+                defaultValue=""
+                onChange={e => { commentRef.current = e.target.value }}
                 onKeyDown={e => e.key === 'Enter' && sendComment()}
                 placeholder="Bir şeyler yaz... 💪"
                 style={{ flex: 1, background: c.surface2, border: `1px solid ${c.border}`, color: c.text, borderRadius: 10, padding: '10px 14px', fontSize: 14, outline: 'none' }} />

@@ -129,11 +129,14 @@ export default function OnboardingPage() {
           <div style={{color:'#6b7280',fontSize:12,textAlign:'center'}}>
             Arkadaşın bu kodu girdiğinde duo'nuz aktif olacak
           </div>
-          <button style={s.btn()} onClick={() => {navigator.clipboard.writeText(inviteCode); alert('Kod kopyalandı!')}}>
+          <button style={s.btn()} onClick={() => { navigator.clipboard.writeText(inviteCode); alert('Kod kopyalandı!') }}>
             📋 Kodu Kopyala
           </button>
           <button style={s.outlineBtn} onClick={() => router.push('/dashboard')}>
             Dashboard'a Git →
+          </button>
+          <button style={{...s.outlineBtn, marginTop: 4, fontSize: 12}} onClick={() => setMode('choose')}>
+            ← Geri Dön
           </button>
         </div>
       </div>
