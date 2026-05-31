@@ -65,6 +65,11 @@ useEffect(() => {
   return () => { supabase.removeChannel(channel) }
 }, [duo])
 
+useEffect(() => {
+  const el = document.getElementById('chatMessages')
+  if (el) el.scrollTop = el.scrollHeight
+}, [comments])
+
   async function loadAll() {
     setLoading(true)
     const { data: { user: authUser } } = await supabase.auth.getUser()
@@ -98,7 +103,7 @@ useEffect(() => {
       setMyMeasures(myM || [])
       setPartnerMeasures(partM || [])
 
-      const { data: comm } = await supabase.from('comments').select('*, author:profiles(*)').eq('duo_id', duoData.id).order('created_at', { ascending: false }).limit(20)
+      const { data: comm } = await supabase.from('comments').select('*, author:profiles(*)').eq('duo_id', duoData.id).order('created_at', { ascending: true }).limit(20)
       setComments(comm || [])
     }
     setLoading(false)
@@ -311,7 +316,9 @@ useEffect(() => {
           {/* YORUMLAR */}
           <Card style={{ marginBottom: 24 }}>
             <div style={{ padding: '16px 20px', borderBottom: `1px solid ${c.border}`, fontWeight: 700 }}>💬 Duo Sohbeti</div>
-            <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 300, overflowY: 'auto' }}>
+            <div 
+              id="chatMessages"
+              style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 300, overflowY: 'auto' }}>
               {comments.length === 0 && <div style={{ color: c.muted, fontSize: 13, textAlign: 'center' }}>Henüz mesaj yok. İlk sen yaz!</div>}
               {comments.map(comm => (
                 <div key={comm.id} style={{ display: 'flex', gap: 10, flexDirection: (comm as any).author?.id === user?.id ? 'row-reverse' : 'row' }}>
@@ -319,7 +326,7 @@ useEffect(() => {
                     {(comm as any).author?.username?.[0]?.toUpperCase()}
                   </div>
                   <div style={{ background: c.surface2, borderRadius: 12, padding: '8px 14px', maxWidth: '70%' }}>
-                    <div style={{ fontSize: 13 }}>{comm.content}</div>
+                    <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word' }}>{comm.content}</div>
                     <div style={{ fontSize: 11, color: c.muted, marginTop: 4 }}>{new Date(comm.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</div>
                   </div>
                 </div>
