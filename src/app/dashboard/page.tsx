@@ -6,6 +6,28 @@ import { useRouter } from 'next/navigation'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Duo, DailyEntry, Measurement, Comment, User } from '@/lib/types'
 
+const inputStyle = {
+  background: '#1a1e29', border: '1px solid #252a38', color: '#e8eaf0',
+  borderRadius: 10, padding: '10px 14px', fontSize: 14, width: '100%', outline: 'none'
+}
+
+function Card({ children, style }: any) {
+  return <div style={{ background: '#13161e', border: '1px solid #252a38', borderRadius: 16, overflow: 'hidden', ...style }}>{children}</div>
+}
+
+function Label({ children }: any) {
+  return <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 6 }}>{children}</div>
+}
+
+function Input({ value, onChange, ...props }: any) {
+  return <input value={value} onChange={e => onChange(e.target.value)} style={inputStyle} {...props} />
+}
+
+function SectionTitle({ children }: any) {
+  return <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase' as const, letterSpacing: 0.5, fontWeight: 700, borderTop: '1px solid #252a38', paddingTop: 12, marginTop: 4 }}>{children}</div>
+}
+
+
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null)
   const [duo, setDuo] = useState<Duo | null>(null)
@@ -176,24 +198,6 @@ useEffect(() => {
 
   const myColor = c.a
   const partnerColor = c.b
-
-  function Card({ children, style }: any) {
-    return <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 16, overflow: 'hidden', ...style }}>{children}</div>
-  }
-
-  function Label({ children }: any) {
-    return <div style={{ fontSize: 11, color: c.muted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>{children}</div>
-  }
-
-  function Input({ value, onChange, ...props }: any) {
-    return <input value={value} onChange={e => onChange(e.target.value)}
-      style={{ background: c.surface2, border: `1px solid ${c.border}`, color: c.text, borderRadius: 10, padding: '10px 14px', fontSize: 14, width: '100%', outline: 'none' }}
-      {...props} />
-  }
-
-  function SectionTitle({ children }: any) {
-    return <div style={{ fontSize: 11, color: c.muted, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700, borderTop: `1px solid ${c.border}`, paddingTop: 12, marginTop: 4 }}>{children}</div>
-  }
 
   if (loading) return (
     <div style={{ minHeight: '100vh', background: c.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, fontFamily: 'sans-serif' }}>
@@ -373,7 +377,9 @@ useEffect(() => {
 
               <SectionTitle>🥗 Beslenme</SectionTitle>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div><Label>Kalori (kcal)</Label><Input type="number" value={cal} onChange={setCal} placeholder="2000" /></div>
+                <div><Label>Kalori (kcal)</Label><input type="number" value={cal} onChange={e => setCal(e.target.value)} placeholder="2000"
+                    style={{ background: c.surface2, border: `1px solid ${c.border}`, color: c.text, borderRadius: 10, padding: '10px 14px', fontSize: 14, width: '100%', outline: 'none' }} />
+                </div>
                 <div>
                     <Label>Kalori Hedef</Label>
                     <div style={{ background: c.surface2, border: `1px solid ${c.border}`, borderRadius: 10, padding: '10px 14px', fontSize: 14, color: myGoals.calories ? c.text : c.muted, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -382,7 +388,9 @@ useEffect(() => {
                     </div>
                 </div>
                     
-                <div><Label>Protein (g)</Label><Input type="number" value={protein} onChange={setProtein} placeholder="150" /></div>
+                <div><Label>Protein (g)</Label><input type="number" value={protein} onChange={e => setProtein(e.target.value)} placeholder="150"
+                    style={{ background: c.surface2, border: `1px solid ${c.border}`, color: c.text, borderRadius: 10, padding: '10px 14px', fontSize: 14, width: '100%', outline: 'none' }} />
+                </div>
                 <div>
                     <Label>Protein Hedef (g)</Label>
                     <div style={{ background: c.surface2, border: `1px solid ${c.border}`, borderRadius: 10, padding: '10px 14px', fontSize: 14, color: myGoals.protein ? c.text : c.muted, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
