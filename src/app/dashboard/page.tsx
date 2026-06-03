@@ -45,6 +45,9 @@ export default function DashboardPage() {
   const [measArm, setMeasArm] = useState('')
   const [measLeg, setMeasLeg] = useState('')
 
+  // Goals state
+  const [myGoals, setMyGoals] = useState({ calories: 0, protein: 0, water: 0, steps: 0 })
+
   function today() { return new Date().toISOString().split('T')[0] }
 
   useEffect(() => { 
@@ -78,6 +81,12 @@ useEffect(() => {
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', authUser.id).single()
     if (!profile) { router.push('/auth/login'); return }
     setUser(profile)
+    setMyGoals({
+        calories: profile.calorie_goal || 0,
+        protein: profile.protein_goal || 0,
+        water: profile.water_goal || 0,
+        steps: profile.step_goal || 0,
+    })
 
     const { data: duoData } = await supabase.from('duos').select('*')
       .or(`user_a.eq.${authUser.id},user_b.eq.${authUser.id}`)
@@ -292,6 +301,10 @@ useEffect(() => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 8, height: 8, borderRadius: '50%', background: myColor }} />
           <span style={{ fontWeight: 700, fontSize: 13 }}>{user?.username}</span>
+          <button onClick={() => router.push('/settings')}
+            style={{ background: c.surface2, border: `1px solid ${c.border}`, color: c.muted, borderRadius: 8, padding: '6px 12px', fontSize: 12, cursor: 'pointer' }}>
+            ⚙️ Ayarlar    
+            </button>
           <button onClick={logout} style={{ background: c.surface2, border: `1px solid ${c.border}`, color: c.muted, borderRadius: 8, padding: '6px 12px', fontSize: 12, cursor: 'pointer' }}>Çıkış</button>
         </div>
       </nav>
@@ -361,11 +374,11 @@ useEffect(() => {
               <SectionTitle>🥗 Beslenme</SectionTitle>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div><Label>Kalori (kcal)</Label><Input type="number" value={cal} onChange={setCal} placeholder="2000" /></div>
-                <div><Label>Kalori Hedef</Label><Input type="number" value={calGoal} onChange={setCalGoal} placeholder="2200" /></div>
+                <div><Label>Kalori Hedef</Label><Input type="number" value={calGoal || myGoals.calories.toString()} onChange={setCalGoal} placeholder={myGoals.calories ? myGoals.calories.toString() : "2200"} /></div>
                 <div><Label>Protein (g)</Label><Input type="number" value={protein} onChange={setProtein} placeholder="150" /></div>
-                <div><Label>Protein Hedef (g)</Label><Input type="number" value={proteinGoal} onChange={setProteinGoal} placeholder="160" /></div>
+                <div><Label>Protein Hedef (g)</Label><Input type="number" value={proteinGoal || myGoals.protein.toString()} onChange={setProteinGoal} placeholder={myGoals.protein ? myGoals.protein.toString() : "160"} /></div>
               </div>
-              <div><Label>Su (litre)</Label><Input type="number" value={water} onChange={setWater} placeholder="2.5" step="0.1" /></div>
+              <div><Label>Su (litre)</Label><Input type="number" value={water || myGoals.water.toString()} onChange={setWater} placeholder={myGoals.water ? myGoals.water.toString() : "2.5"} step="0.1" /></div>
 
               <SectionTitle>🏃 Aktiviteler</SectionTitle>
               {activities.map((a, i) => (
@@ -387,7 +400,7 @@ useEffect(() => {
                 style={{ background: 'none', border: `1px dashed ${c.border}`, color: c.muted, borderRadius: 10, padding: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
                 + Aktivite Ekle
               </button>
-              <div><Label>Adım Sayısı</Label><Input type="number" value={steps} onChange={setSteps} placeholder="8000" /></div>
+              <div><Label>Adım Sayısı</Label><Input type="number" value={steps || myGoals.steps.toString()} onChange={setSteps} placeholder={myGoals.steps ? myGoals.steps.toString() : "8000"} /></div>
 
               <button onClick={saveEntry} disabled={saving}
                 style={{ background: myColor, color: '#0d0f14', border: 'none', borderRadius: 10, padding: 14, fontWeight: 700, fontSize: 15, cursor: 'pointer', opacity: saving ? 0.6 : 1 }}>
