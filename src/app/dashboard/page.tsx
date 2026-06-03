@@ -126,8 +126,8 @@ useEffect(() => {
     const totalWorkout = acts.reduce((s, a) => s + a.duration, 0)
     const entry = {
       user_id: user.id, duo_id: duo.id, date: entryDate,
-      calories: parseInt(cal) || null, calories_goal: parseInt(calGoal) || null,
-      protein: parseFloat(protein) || null, protein_goal: parseFloat(proteinGoal) || null,
+      calories: parseInt(cal) || null, calories_goal: myGoals.calories || null,
+      protein: parseFloat(protein) || null, protein_goal: myGoals.protein || null,
       water: parseFloat(water) || null, steps: parseInt(steps) || null,
       activities: acts, total_burned: totalBurned || null, total_workout: totalWorkout || null
     }
@@ -427,7 +427,12 @@ useEffect(() => {
                 style={{ background: 'none', border: `1px dashed ${c.border}`, color: c.muted, borderRadius: 10, padding: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
                 + Aktivite Ekle
               </button>
-              <div><Label>Adım Sayısı</Label><Input type="number" value={steps || myGoals.steps.toString()} onChange={setSteps} placeholder={myGoals.steps ? myGoals.steps.toString() : "8000"} /></div>
+              <div>
+                <Label>Adım Sayısı</Label>
+                <input type="number" value={steps} onChange={e => setSteps(e.target.value)}
+                    placeholder={myGoals.steps ? `Hedef: ${myGoals.steps}` : "8000"}
+                    style={{ background: c.surface2, border: `1px solid ${c.border}`, color: c.text, borderRadius: 10, padding: '10px 14px', fontSize: 14, width: '100%', outline: 'none' }} />
+              </div>
 
               <button onClick={saveEntry} disabled={saving}
                 style={{ background: myColor, color: '#0d0f14', border: 'none', borderRadius: 10, padding: 14, fontWeight: 700, fontSize: 15, cursor: 'pointer', opacity: saving ? 0.6 : 1 }}>
