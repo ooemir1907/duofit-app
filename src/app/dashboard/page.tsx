@@ -374,11 +374,38 @@ useEffect(() => {
               <SectionTitle>🥗 Beslenme</SectionTitle>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div><Label>Kalori (kcal)</Label><Input type="number" value={cal} onChange={setCal} placeholder="2000" /></div>
-                <div><Label>Kalori Hedef</Label><Input type="number" value={calGoal || myGoals.calories.toString()} onChange={setCalGoal} placeholder={myGoals.calories ? myGoals.calories.toString() : "2200"} /></div>
+                <div>
+                    <Label>Kalori Hedef</Label>
+                    <div style={{ background: c.surface2, border: `1px solid ${c.border}`, borderRadius: 10, padding: '10px 14px', fontSize: 14, color: myGoals.calories ? c.text : c.muted, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>{myGoals.calories ? `${myGoals.calories} kcal` : 'Ayarlardan belirle'}</span>
+                        {!myGoals.calories && <button onClick={() => router.push('/settings')} style={{ background: 'none', border: 'none', color: '#6ee7b7', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>Ayarla →</button>}
+                    </div>
+                </div>
+                    
                 <div><Label>Protein (g)</Label><Input type="number" value={protein} onChange={setProtein} placeholder="150" /></div>
-                <div><Label>Protein Hedef (g)</Label><Input type="number" value={proteinGoal || myGoals.protein.toString()} onChange={setProteinGoal} placeholder={myGoals.protein ? myGoals.protein.toString() : "160"} /></div>
+                <div>
+                    <Label>Protein Hedef (g)</Label>
+                    <div style={{ background: c.surface2, border: `1px solid ${c.border}`, borderRadius: 10, padding: '10px 14px', fontSize: 14, color: myGoals.protein ? c.text : c.muted, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>{myGoals.protein ? `${myGoals.protein}g` : 'Ayarlardan belirle'}</span>
+                        {!myGoals.protein && <button onClick={() => router.push('/settings')} style={{ background: 'none', border: 'none', color: '#6ee7b7', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>Ayarla →</button>}
+                    </div>
+                </div>
+
               </div>
-              <div><Label>Su (litre)</Label><Input type="number" value={water || myGoals.water.toString()} onChange={setWater} placeholder={myGoals.water ? myGoals.water.toString() : "2.5"} step="0.1" /></div>
+              <div>
+                <Label>Su Hedefi</Label>
+                <div
+                    onClick={() => setWater(water === 'true' ? '' : 'true')}
+                    style={{ background: water === 'true' ? '#6ee7b720' : c.surface2, border: `2px solid ${water === 'true' ? '#6ee7b7' : c.border}`, borderRadius: 10, padding: '12px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s' }}>
+                    <div style={{ width: 22, height: 22, borderRadius: 6, background: water === 'true' ? '#6ee7b7' : c.surface, border: `2px solid ${water === 'true' ? '#6ee7b7' : c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}>
+                        {water === 'true' && <span style={{ color: '#0d0f14', fontSize: 14, fontWeight: 800 }}>✓</span>}  
+                    </div>
+                    <span style={{ fontSize: 14, color: water === 'true' ? c.text : c.muted }}>
+                        {myGoals.water ? `Günlük ${myGoals.water}L su içildi` : 'Su hedefi içildi'}
+                    </span>
+                </div>
+               </div>
+            
 
               <SectionTitle>🏃 Aktiviteler</SectionTitle>
               {activities.map((a, i) => (
