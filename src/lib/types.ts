@@ -4,6 +4,15 @@ export type User = {
   full_name: string | null
   avatar_color: string
   created_at: string
+  calorie_goal?: number | null
+  protein_goal?: number | null
+  water_goal?: number | null
+  step_goal?: number | null
+  current_streak?: number
+  longest_streak?: number
+  last_active_date?: string | null
+  rescues_used_this_month?: number
+  rescues_month?: string | null
 }
 
 export type Duo = {

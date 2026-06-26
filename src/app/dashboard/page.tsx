@@ -1,10 +1,11 @@
 'use client'
 
-
+import { isConsecutiveDay, getCurrentMonth, getRandomQuestions } from '@/lib/streak'
 import { createClient } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Duo, DailyEntry, Measurement, Comment, User } from '@/lib/types'
+
 
 const inputStyle = {
   background: '#1a1e29', border: '1px solid #252a38', color: '#e8eaf0',
@@ -54,6 +55,8 @@ export default function DashboardPage() {
   const [water, setWater] = useState('')
   const [steps, setSteps] = useState('')
   const [activities, setActivities] = useState<{type:string,duration:string,burned:string}[]>([])
+  const [todayMeals, setTodayMeals] = useState<{id:string,description:string,calories:number,protein:number,carbs:number,fat:number}[]>([])
+  const [showWeeklyWrap, setShowWeeklyWrap] = useState(false)
 
   // Measure form state
   const [measDate, setMeasDate] = useState(today())
@@ -66,6 +69,15 @@ export default function DashboardPage() {
   const [measHip, setMeasHip] = useState('')
   const [measArm, setMeasArm] = useState('')
   const [measLeg, setMeasLeg] = useState('')
+
+  // AI form state
+
+  const [aiInput, setAiInput] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiResult, setAiResult] = useState<{calories:number,protein:number,carbs:number,fat:number,summary:string} | null>(null)
+  const [aiError, setAiError] = useState('')
+
+  const [streakBroken, setStreakBroken] = useState<{canRescue: boolean, missedDate: string, oldStreak: number} | null>(null)
 
   // Goals state
   const [myGoals, setMyGoals] = useState({ calories: 0, protein: 0, water: 0, steps: 0 })
@@ -95,6 +107,13 @@ useEffect(() => {
   if (el) el.scrollTop = el.scrollHeight
 }, [comments])
 
+useEffect(() => {
+  if (todayMeals.length > 0) {
+    setCal(todayMeals.reduce((s,m)=>s+m.calories,0).toString())
+    setProtein(todayMeals.reduce((s,m)=>s+m.protein,0).toString())
+  }
+}, [todayMeals])
+
   async function loadAll() {
     setLoading(true)
     const { data: { user: authUser } } = await supabase.auth.getUser()
@@ -103,6 +122,21 @@ useEffect(() => {
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', authUser.id).single()
     if (!profile) { router.push('/auth/login'); return }
     setUser(profile)
+
+// Streak kırılma kontrolü
+if (profile.last_active_date) {
+  const lastDate = new Date(profile.last_active_date)
+  const todayDate = new Date(today())
+  const diffDays = Math.round((todayDate.getTime() - lastDate.getTime()) / 86400000)
+  
+  if (diffDays >= 2 && profile.current_streak > 0) {
+    // Streak kırıldı, kurtarma hakkı var mı kontrol et
+    const month = getCurrentMonth()
+    const rescuesUsed = profile.rescues_month === month ? (profile.rescues_used_this_month || 0) : 0
+    setStreakBroken({ canRescue: rescuesUsed < 2, missedDate: profile.last_active_date, oldStreak: profile.current_streak })
+  }
+}
+
     setMyGoals({
         calories: profile.calorie_goal || 0,
         protein: profile.protein_goal || 0,
@@ -128,6 +162,9 @@ useEffect(() => {
       const { data: partE } = await supabase.from('daily_entries').select('*').eq('user_id', partnerId).eq('duo_id', duoData.id).order('date', { ascending: false })
       setMyEntries(myE || [])
       setPartnerEntries(partE || [])
+
+      const { data: meals } = await supabase.from('meal_entries').select('*').eq('user_id', authUser.id).eq('duo_id', duoData.id).eq('date', today())
+      setTodayMeals(meals || [])
 
       const { data: myM } = await supabase.from('measurements').select('*').eq('user_id', authUser.id).eq('duo_id', duoData.id).order('date', { ascending: false })
       const { data: partM } = await supabase.from('measurements').select('*').eq('user_id', partnerId).eq('duo_id', duoData.id).order('date', { ascending: false })
@@ -155,9 +192,68 @@ useEffect(() => {
     }
     await supabase.from('daily_entries').upsert(entry, { onConflict: 'user_id,date' })
     setSaving(false)
+
+// Streak güncelle
+if (entryDate === today() && user) {
+  const status = isConsecutiveDay(user.last_active_date, today())
+  let newStreak = user.current_streak || 0
+  if (status === 'continue') newStreak += 1
+  else if (status === 'broken') newStreak = 1
+  // 'same' ise değişmez, zaten bugün girilmiş
+
+  if (status !== 'same') {
+    await supabase.from('profiles').update({
+      current_streak: newStreak,
+      longest_streak: Math.max(newStreak, user.longest_streak || 0),
+      last_active_date: today()
+    }).eq('id', user.id)
+  }
+}
+
     loadAll()
     setActiveTab('dashboard')
   }
+
+  async function calculateMeal() {
+  if (!aiInput.trim()) return
+  setAiLoading(true)
+  setAiError('')
+  setAiResult(null)
+  try {
+    const res = await fetch('/api/calculate-meal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: aiInput })
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      setAiError(data.error || 'Bir hata oluştu')
+      setAiLoading(false)
+      return
+    }
+    setAiResult(data)
+  } catch (e) {
+    setAiError('Bağlantı hatası')
+  }
+  setAiLoading(false)
+}
+
+async function applyAiResult() {
+  if (!aiResult || !user || !duo) return
+  await supabase.from('meal_entries').insert({
+    user_id: user.id,
+    duo_id: duo.id,
+    date: today(),
+    description: aiInput,
+    calories: aiResult.calories,
+    protein: aiResult.protein,
+    carbs: aiResult.carbs,
+    fat: aiResult.fat,
+  })
+  setAiResult(null)
+  setAiInput('')
+  loadAll()
+}
 
   async function saveMeasure() {
     if (!user || !duo) return
@@ -291,6 +387,30 @@ useEffect(() => {
 
   return (
     <div style={{ minHeight: '100vh', background: c.bg, color: c.text, fontFamily: 'sans-serif' }}>
+      {streakBroken && (
+  <StreakRescueModal 
+    streakBroken={streakBroken}
+    onClose={() => setStreakBroken(null)}
+    onRescued={() => { setStreakBroken(null); loadAll() }}
+    user={user}
+    duo={duo}
+    supabase={supabase}
+  />
+)}
+
+{showWeeklyWrap && (
+  <WeeklyWrapModal
+    onClose={() => setShowWeeklyWrap(false)}
+    user={user}
+    partner={partner}
+    myEntries={myEntries}
+    partnerEntries={partnerEntries}
+    myMeasures={myMeasures}
+    partnerMeasures={partnerMeasures}
+    myColor={myColor}
+    partnerColor={partnerColor}
+  />
+)}
       {/* NAV */}
       <nav style={{ background: c.surface, borderBottom: `1px solid ${c.border}`, padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100, flexWrap: 'wrap', gap: 12 }}>
         <div style={{ fontWeight: 800, fontSize: 20 }}><span style={{ color: c.a }}>Duo</span><span style={{ color: c.b }}>Fit</span></div>
@@ -329,6 +449,14 @@ useEffect(() => {
             <UserPanel name={user?.username || ''} color={myColor} entry={myToday} meas={myLatestMeas} streak={calcStreak(myEntries)} />
             <UserPanel name={partner?.username || 'Arkadaşın'} color={partnerColor} entry={partnerToday} meas={partnerLatestMeas} streak={calcStreak(partnerEntries)} />
           </div>
+
+          <div onClick={() => setShowWeeklyWrap(true)} style={{ background: `linear-gradient(135deg, ${myColor}15, ${partnerColor}15)`, border: `1px solid ${c.border}`, borderRadius: 16, padding: 20, marginBottom: 24, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', transition: 'all 0.2s'}}>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 16 }}>📊 Haftalık Özetin Hazır</div>
+              <div style={{ color: c.muted, fontSize: 12, marginTop: 4 }}>Bu hafta neler yaptın, gör</div>
+              </div>
+              <div style={{ fontSize: 24 }}>→</div>
+              </div>
 
           {/* YORUMLAR */}
           <Card style={{ marginBottom: 24 }}>
@@ -374,6 +502,60 @@ useEffect(() => {
             </div>
             <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div><Label>Tarih</Label><Input type="date" value={entryDate} onChange={setEntryDate} /></div>
+
+              <div style={{ background: `${myColor}10`, border: `1px solid ${myColor}30`, borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+  <div style={{ fontSize: 13, fontWeight: 700, color: myColor, display: 'flex', alignItems: 'center', gap: 6 }}>
+    ✨ AI ile Kalori Hesapla
+  </div>
+  <textarea
+    value={aiInput}
+    onChange={e => setAiInput(e.target.value)}
+    placeholder="Ne yedin? Örn: 1 tabak makarna, 2 yumurta, yarım ekmek"
+    rows={2}
+    maxLength={500}
+    style={{ background: c.surface2, border: `1px solid ${c.border}`, color: c.text, borderRadius: 10, padding: '10px 14px', fontSize: 13, resize: 'none', outline: 'none', fontFamily: 'inherit' }}
+  />
+  <button onClick={calculateMeal} disabled={aiLoading || !aiInput.trim()}
+    style={{ background: myColor, color: '#0d0f14', border: 'none', borderRadius: 10, padding: 10, fontWeight: 700, fontSize: 13, cursor: 'pointer', opacity: aiLoading ? 0.6 : 1 }}>
+    {aiLoading ? 'Hesaplanıyor...' : '🧮 Hesapla'}
+  </button>
+
+  {aiError && <div style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid #f87171', borderRadius: 8, padding: 10, color: '#f87171', fontSize: 12 }}>{aiError}</div>}
+
+  {aiResult && (
+    <div style={{ background: c.surface2, borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 12, color: c.muted }}>{aiResult.summary}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div style={{ fontSize: 13 }}>🔥 <strong>{aiResult.calories}</strong> kcal</div>
+        <div style={{ fontSize: 13 }}>💪 <strong>{aiResult.protein}</strong>g protein</div>
+        <div style={{ fontSize: 13 }}>🍞 <strong>{aiResult.carbs}</strong>g karbonhidrat</div>
+        <div style={{ fontSize: 13 }}>🥑 <strong>{aiResult.fat}</strong>g yağ</div>
+      </div>
+      <button onClick={applyAiResult}
+        style={{ background: myColor, color: '#0d0f14', border: 'none', borderRadius: 8, padding: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer', marginTop: 4 }}>
+        ✓ Veri Girişine Ekle
+      </button>
+    </div>
+  )}
+
+{todayMeals.length > 0 && (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+    <div style={{ fontSize: 12, color: c.muted, fontWeight: 700 }}>BUGÜN EKLENEN YEMEKLER ({todayMeals.length})</div>
+    {todayMeals.map(meal => (
+      <div key={meal.id} style={{ background: c.surface2, borderRadius: 8, padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <div style={{ fontSize: 12, flex: 1 }}>{meal.description} <span style={{ color: c.muted }}>· {meal.calories}kcal · {meal.protein}g</span></div>
+        <button onClick={async () => { await supabase.from('meal_entries').delete().eq('id', meal.id); loadAll() }}
+          style={{ background: 'none', border: 'none', color: c.muted, cursor: 'pointer', fontSize: 14 }}>✕</button>
+      </div>
+    ))}
+    <div style={{ background: `${myColor}15`, borderRadius: 8, padding: '10px 12px', display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 13 }}>
+      <span>Toplam</span>
+      <span>{todayMeals.reduce((s,m)=>s+m.calories,0)} kcal · {todayMeals.reduce((s,m)=>s+m.protein,0)}g protein</span>
+    </div>
+  </div>
+)}
+
+</div>
 
               <SectionTitle>🥗 Beslenme</SectionTitle>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -589,6 +771,307 @@ useEffect(() => {
           </div>
         </>}
 
+      </div>
+    </div>
+  )
+}
+
+function StreakRescueModal({ streakBroken, onClose, onRescued, user, duo, supabase }: any) {
+  const [step, setStep] = useState<'ask' | 'questions' | 'success' | 'waiting' | 'denied'>('ask')
+  const [questions] = useState(() => getRandomQuestions())
+  const [answers, setAnswers] = useState<string[]>(['', ''])
+  const [customAnswer, setCustomAnswer] = useState<{[key: number]: string}>({})
+  const [submitting, setSubmitting] = useState(false)
+
+  const c = { surface: '#13161e', surface2: '#1a1e29', border: '#252a38', a: '#6ee7b7', b: '#f472b6', text: '#e8eaf0', muted: '#6b7280', danger: '#f87171', gold: '#fbbf24' }
+
+  function startRescue() {
+    if (!streakBroken.canRescue) { setStep('denied'); return }
+    setStep('questions')
+  }
+
+  function selectOption(qIndex: number, option: string) {
+    const n = [...answers]
+    n[qIndex] = option === 'Diğer' ? (customAnswer[qIndex] || '') : option
+    setAnswers(n)
+  }
+
+  async function submitAnswers() {
+    if (answers.some(a => !a.trim())) return
+    setSubmitting(true)
+
+    const month = getCurrentMonth()
+    const rescuesUsed = user.rescues_month === month ? (user.rescues_used_this_month || 0) : 0
+    const autoApprove = rescuesUsed < 2
+
+    await supabase.from('streak_rescues').insert({
+      user_id: user.id,
+      duo_id: duo.id,
+      missed_date: streakBroken.missedDate,
+      status: autoApprove ? 'approved' : 'pending',
+      questions: questions.map((q: any) => q.question),
+      answers
+    })
+
+    await supabase.from('profiles').update({
+      rescues_used_this_month: rescuesUsed + 1,
+      rescues_month: month,
+      ...(autoApprove ? { current_streak: streakBroken.oldStreak, last_active_date: new Date().toISOString().split('T')[0] } : {})
+    }).eq('id', user.id)
+
+    setSubmitting(false)
+    setStep(autoApprove ? 'success' : 'waiting')
+  }
+
+  async function giveUp() {
+    await supabase.from('profiles').update({
+      current_streak: 0,
+      last_active_date: null
+    }).eq('id', user.id)
+    onRescued()
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
+      <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 16, padding: 32, width: 440, maxHeight: '90vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        
+        {step === 'ask' && <>
+          <div style={{ textAlign: 'center', fontSize: 40 }}>💔</div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontWeight: 800, fontSize: 20 }}>Streak'in Kırıldı</div>
+            <div style={{ color: c.muted, fontSize: 13, marginTop: 8 }}>
+              {streakBroken.oldStreak} günlük serin sona erdi. Kurtarmak ister misin?
+            </div>
+          </div>
+          {streakBroken.canRescue ? (
+            <>
+              <div style={{ background: `${c.gold}15`, border: `1px solid ${c.gold}40`, borderRadius: 10, padding: 12, fontSize: 12, color: c.text }}>
+                Bu ay kalan kurtarma hakkın var. Birkaç soruyu cevapla, streak'in geri gelsin.
+              </div>
+              <button onClick={startRescue} style={{ background: c.a, color: '#0d0f14', border: 'none', borderRadius: 10, padding: 12, fontWeight: 700, cursor: 'pointer' }}>
+                Evet, Kurtarmak İstiyorum
+              </button>
+            </>
+          ) : (
+            <div style={{ background: `${c.danger}15`, border: `1px solid ${c.danger}40`, borderRadius: 10, padding: 12, fontSize: 12, color: c.text }}>
+              Bu ay otomatik kurtarma hakkın bitti. Şimdi duonun onayı gerekiyor.
+            </div>
+          )}
+          {!streakBroken.canRescue && (
+            <button onClick={startRescue} style={{ background: c.b, color: '#0d0f14', border: 'none', borderRadius: 10, padding: 12, fontWeight: 700, cursor: 'pointer' }}>
+              Duona Sor
+            </button>
+          )}
+          <button onClick={giveUp} style={{ background: 'none', border: `1px solid ${c.border}`, color: c.muted, borderRadius: 10, padding: 10, cursor: 'pointer', fontSize: 13 }}>
+            Boşver, Yeniden Başlarım
+          </button>
+        </>}
+
+        {step === 'questions' && <>
+          <div style={{ fontWeight: 800, fontSize: 18 }}>Birkaç Soru</div>
+          <div style={{ color: c.muted, fontSize: 12 }}>Hızlıca seç, devam edelim</div>
+          {questions.map((q: any, i: number) => (
+            <div key={i}>
+              <div style={{ fontSize: 13, marginBottom: 10, fontWeight: 600 }}>{q.question}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {q.options.map((opt: string) => (
+                  <button
+                    key={opt}
+                    onClick={() => selectOption(i, opt)}
+                    style={{
+                      background: answers[i] === opt || (opt === 'Diğer' && answers[i] && !q.options.slice(0,-1).includes(answers[i])) ? `${c.a}20` : c.surface2,
+                      border: `1px solid ${answers[i] === opt || (opt === 'Diğer' && answers[i] && !q.options.slice(0,-1).includes(answers[i])) ? c.a : c.border}`,
+                      color: c.text, borderRadius: 8, padding: '10px 14px', fontSize: 13, textAlign: 'left', cursor: 'pointer'
+                    }}>
+                    {opt}
+                  </button>
+                ))}
+                {q.options.includes('Diğer') && !q.options.slice(0,-1).includes(answers[i]) === false ? null : null}
+              </div>
+              {(answers[i] !== '' && !q.options.slice(0, -1).includes(answers[i])) || (customAnswer[i] !== undefined) ? (
+                <input
+                  value={customAnswer[i] || ''}
+                  onChange={e => { setCustomAnswer({...customAnswer, [i]: e.target.value}); const n = [...answers]; n[i] = e.target.value; setAnswers(n) }}
+                  placeholder="Yazabilirsin..."
+                  style={{ marginTop: 8, background: c.surface2, border: `1px solid ${c.border}`, color: c.text, borderRadius: 8, padding: '8px 12px', fontSize: 13, width: '100%', outline: 'none' }}
+                />
+              ) : null}
+            </div>
+          ))}
+          <button onClick={submitAnswers} disabled={submitting || answers.some(a => !a.trim())}
+            style={{ background: c.a, color: '#0d0f14', border: 'none', borderRadius: 10, padding: 12, fontWeight: 700, cursor: 'pointer', opacity: submitting ? 0.6 : 1 }}>
+            {submitting ? 'Gönderiliyor...' : 'Gönder'}
+          </button>
+        </>}
+
+        {step === 'success' && <>
+          <div style={{ textAlign: 'center', fontSize: 40 }}>🎉</div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontWeight: 800, fontSize: 18 }}>Streak'in Geri Geldi!</div>
+            <div style={{ color: c.muted, fontSize: 13, marginTop: 8 }}>
+              {streakBroken.oldStreak} günlük serin korundu. Devam et! 💪
+            </div>
+          </div>
+          <button onClick={onRescued} style={{ background: c.a, color: '#0d0f14', border: 'none', borderRadius: 10, padding: 12, fontWeight: 700, cursor: 'pointer' }}>
+            Harika!
+          </button>
+        </>}
+
+        {step === 'waiting' && <>
+          <div style={{ textAlign: 'center', fontSize: 40 }}>⏳</div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontWeight: 800, fontSize: 18 }}>Duona Gönderildi</div>
+            <div style={{ color: c.muted, fontSize: 13, marginTop: 8 }}>
+              Cevapların duonun onayına gönderildi. Dashboard'da bildirim göreceksin.
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: c.surface2, border: `1px solid ${c.border}`, color: c.text, borderRadius: 10, padding: 12, cursor: 'pointer' }}>
+            Anladım
+          </button>
+        </>}
+
+        {step === 'denied' && <>
+          <div style={{ textAlign: 'center', fontSize: 40 }}>🚫</div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontWeight: 800, fontSize: 18 }}>Hak Kalmadı</div>
+            <div style={{ color: c.muted, fontSize: 13, marginTop: 8 }}>
+              Bu ay 2 kurtarma hakkını kullandın. Önümüzdeki ay tekrar hakkın olacak.
+            </div>
+          </div>
+          <button onClick={giveUp} style={{ background: c.a, color: '#0d0f14', border: 'none', borderRadius: 10, padding: 12, fontWeight: 700, cursor: 'pointer' }}>
+            Tamam, Devam Ediyorum
+          </button>
+        </>}
+
+      </div>
+    </div>
+  )
+}
+
+function WeeklyWrapModal({ onClose, user, partner, myEntries, partnerEntries, myMeasures, partnerMeasures, myColor, partnerColor }: any) {
+  const [cardIndex, setCardIndex] = useState(0)
+  const c = { surface: '#13161e', surface2: '#1a1e29', border: '#252a38', a: '#6ee7b7', b: '#f472b6', text: '#e8eaf0', muted: '#6b7280', gold: '#fbbf24' }
+
+  const weekAgo = (() => { const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().split('T')[0] })()
+  const myWeek = myEntries.filter((e: any) => e.date >= weekAgo)
+  const partnerWeek = partnerEntries.filter((e: any) => e.date >= weekAgo)
+
+  const myAvgCal = myWeek.length ? Math.round(myWeek.reduce((s: number, e: any) => s + (e.calories || 0), 0) / myWeek.length) : 0
+  const partnerAvgCal = partnerWeek.length ? Math.round(partnerWeek.reduce((s: number, e: any) => s + (e.calories || 0), 0) / partnerWeek.length) : 0
+  const myActiveDays = myWeek.filter((e: any) => e.activities?.length).length
+  const partnerActiveDays = partnerWeek.filter((e: any) => e.activities?.length).length
+  const myTotalSteps = myWeek.reduce((s: number, e: any) => s + (e.steps || 0), 0)
+  const partnerTotalSteps = partnerWeek.reduce((s: number, e: any) => s + (e.steps || 0), 0)
+  const myDaysLogged = myWeek.length
+  const partnerDaysLogged = partnerWeek.length
+
+  const myWeekMeasures = myMeasures.filter((m: any) => m.date >= weekAgo)
+  const myWeightChange = myWeekMeasures.length >= 2 ? (myWeekMeasures[0].weight - myWeekMeasures[myWeekMeasures.length-1].weight).toFixed(1) : null
+
+  const winner = myActiveDays > partnerActiveDays ? user?.username : partnerActiveDays > myActiveDays ? partner?.username : null
+
+  const cards = [
+    <div key="0" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, textAlign: 'center' }}>
+      <div style={{ fontSize: 48 }}>✨</div>
+      <div style={{ fontWeight: 800, fontSize: 24 }}>Bu Haftan Hazır</div>
+      <div style={{ color: c.muted, fontSize: 14 }}>{user?.username} & {partner?.username}</div>
+    </div>,
+    <div key="1" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ textAlign: 'center', fontSize: 14, color: c.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>VERİ GİRİŞİ</div>
+      <div style={{ display: 'flex', justifyContent: 'space-around' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 36, fontWeight: 800, color: myColor }}>{myDaysLogged}</div>
+          <div style={{ fontSize: 12, color: c.muted }}>{user?.username}</div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 36, fontWeight: 800, color: partnerColor }}>{partnerDaysLogged}</div>
+          <div style={{ fontSize: 12, color: c.muted }}>{partner?.username}</div>
+        </div>
+      </div>
+      <div style={{ textAlign: 'center', fontSize: 13, color: c.muted }}>/ 7 gün veri girdiniz</div>
+    </div>,
+    <div key="2" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ textAlign: 'center', fontSize: 14, color: c.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>AKTİVİTE GÜNLERİ</div>
+      <div style={{ display: 'flex', justifyContent: 'space-around' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 36, fontWeight: 800, color: myColor }}>{myActiveDays}</div>
+          <div style={{ fontSize: 12, color: c.muted }}>{user?.username}</div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 36, fontWeight: 800, color: partnerColor }}>{partnerActiveDays}</div>
+          <div style={{ fontSize: 12, color: c.muted }}>{partner?.username}</div>
+        </div>
+      </div>
+      {winner && <div style={{ textAlign: 'center', fontSize: 13, color: c.gold, fontWeight: 700 }}>🏆 {winner} bu hafta önde!</div>}
+    </div>,
+    <div key="3" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ textAlign: 'center', fontSize: 14, color: c.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>TOPLAM ADIM</div>
+      <div style={{ display: 'flex', justifyContent: 'space-around' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 28, fontWeight: 800, color: myColor }}>{myTotalSteps.toLocaleString('tr')}</div>
+          <div style={{ fontSize: 12, color: c.muted }}>{user?.username}</div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 28, fontWeight: 800, color: partnerColor }}>{partnerTotalSteps.toLocaleString('tr')}</div>
+          <div style={{ fontSize: 12, color: c.muted }}>{partner?.username}</div>
+        </div>
+      </div>
+    </div>,
+    <div key="4" style={{ display: 'flex', flexDirection: 'column', gap: 16, textAlign: 'center' }}>
+      <div style={{ fontSize: 14, color: c.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>KİLO DURUMU</div>
+      {myWeightChange !== null ? (
+        <div>
+          <div style={{ fontSize: 32, fontWeight: 800, color: parseFloat(myWeightChange) < 0 ? c.a : '#f87171' }}>
+            {parseFloat(myWeightChange) > 0 ? '+' : ''}{myWeightChange}kg
+          </div>
+          <div style={{ color: c.muted, fontSize: 13, marginTop: 8 }}>
+            {parseFloat(myWeightChange) < 0 ? 'Harika gidiyorsun! 💪' : 'Devam et, sen yaparsın 🔥'}
+          </div>
+        </div>
+      ) : (
+        <div style={{ color: c.muted, fontSize: 13 }}>Bu hafta ölçüm girilmedi</div>
+      )}
+    </div>,
+    <div key="5" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, textAlign: 'center' }}>
+      <div style={{ fontSize: 48 }}>🎯</div>
+      <div style={{ fontWeight: 800, fontSize: 20 }}>Yeni Haftaya Hazır mısın?</div>
+      <div style={{ color: c.muted, fontSize: 13 }}>Birbirinizi motive edin, devam edin!</div>
+    </div>,
+  ]
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: `linear-gradient(135deg, ${c.surface}, ${c.surface2})`, border: `1px solid ${c.border}`, borderRadius: 20, padding: 36, width: 380, minHeight: 380, display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative' }}>
+        
+        <button onClick={onClose} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', color: c.muted, fontSize: 20, cursor: 'pointer' }}>✕</button>
+
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {cards[cardIndex]}
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 24 }}>
+          {cards.map((_, i) => (
+            <div key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: i === cardIndex ? c.a : c.border }} />
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 20 }}>
+          <button onClick={() => setCardIndex(Math.max(0, cardIndex - 1))} disabled={cardIndex === 0}
+            style={{ background: c.surface2, border: `1px solid ${c.border}`, color: c.text, borderRadius: 10, padding: '10px 16px', cursor: 'pointer', opacity: cardIndex === 0 ? 0.3 : 1 }}>
+            ← Önceki
+          </button>
+          {cardIndex < cards.length - 1 ? (
+            <button onClick={() => setCardIndex(cardIndex + 1)}
+              style={{ background: c.a, color: '#0d0f14', border: 'none', borderRadius: 10, padding: '10px 16px', fontWeight: 700, cursor: 'pointer' }}>
+              Sonraki →
+            </button>
+          ) : (
+            <button onClick={onClose}
+              style={{ background: c.a, color: '#0d0f14', border: 'none', borderRadius: 10, padding: '10px 16px', fontWeight: 700, cursor: 'pointer' }}>
+              Tamam ✓
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )
